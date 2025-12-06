@@ -1,29 +1,30 @@
-from flask import Flask, jsonify
+from flask import Flask
 from joblib import load
-import numpy as np
 import requests
+import numpy as np
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
+model = load('btc_model.joblib')
 
-# Load model
-model = load("btc_model.joblib")
-
-# Fetch latest BTC 5-min data
 def fetch_latest_btc():
-    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
-    params = {"granularity": 300, "limit": 2}  # last 2 candles
-    r = requests.get(url, params=params)
-    data = r.json()
-    data.sort(key=lambda x: x[0])
-    last = data[-2:]
-    return np.array([[last[0][3], last[0][4]]])  # previous open, close
+    end = datetime.utcnow()
+    start = end - timedelta(minutes=5)
+    url = 'https://api.exchange.coinbase.com/products/BTC-USD/candles'
+    params = {'start': start.isoformat(), 'end': end.isoformat(), 'granularity': 300}
+    data = requests.get(url, params=params).json()
+    latest = data[-1]
+    return np.array([latest[3], latest[2], latest[1], latest[4], latest[5]]).reshape(1, -1)
 
-@app.route("/")
-def predict():
-    features = fetch_latest_btc()
-    pred = model.predict(features)[0]
-    action = "BUY" if pred == 1 else "SELL"
-    return jsonify({"action": action})
+@app.route('/')
+def index():
+    try:
+        latest = fetch_latest_btc()
+        pred = model.predict(latest)
+        action = 'BUY' if pred[0] == 1 else 'SELL'
+        return f"<h1>Next 5-min BTC/USD action: {action}</h1>"
+    except Exception as e:
+        return f"<h1>Error fetching prediction: {e}</h1>"
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
